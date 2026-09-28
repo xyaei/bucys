@@ -96,6 +96,83 @@ if (filters) {
   });
 }
 
+const binaryCols = [...document.querySelectorAll(".binary span")];
+if (motionOk && binaryCols.length) {
+  const buffers = binaryCols.map((col) => col.textContent.split(""));
+  let binaryTimer = 0;
+  function flipBinary() {
+    buffers.forEach((chars, index) => {
+      const flips = 5 + (index % 4);
+      for (let n = 0; n < flips; n += 1) {
+        const at = Math.floor(Math.random() * chars.length);
+        if (chars[at] === "0") chars[at] = "1";
+        else if (chars[at] === "1") chars[at] = "0";
+      }
+      binaryCols[index].textContent = chars.join("");
+    });
+  }
+  const hero = document.querySelector(".hero");
+  const startBinary = () => {
+    if (binaryTimer || document.hidden) return;
+    binaryTimer = window.setInterval(flipBinary, 180);
+  };
+  const stopBinary = () => {
+    window.clearInterval(binaryTimer);
+    binaryTimer = 0;
+  };
+  if (hero && "IntersectionObserver" in window) {
+    const watch = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => (entry.isIntersecting ? startBinary() : stopBinary()));
+    });
+    watch.observe(hero);
+  } else {
+    startBinary();
+  }
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) stopBinary();
+    else if (!hero || hero.getBoundingClientRect().bottom > 0) startBinary();
+  });
+}
+
+const doTerm = document.querySelector(".do-term");
+if (doTerm) {
+  const items = [...doTerm.querySelectorAll(".do-list li")];
+  const files = [...doTerm.querySelectorAll(".do-file")];
+  const count = doTerm.querySelector(".do-count");
+  const path = doTerm.querySelector(".do-path");
+  const names = files.map((file) => file.textContent.trim());
+  let index = 0;
+  function showDo(next, dir) {
+    index = (next + items.length) % items.length;
+    items.forEach((item, i) => {
+      const on = i === index;
+      item.classList.toggle("is-on", on);
+      item.classList.toggle("is-from-next", on && dir > 0);
+      item.classList.toggle("is-from-prev", on && dir < 0);
+      item.setAttribute("aria-hidden", on ? "false" : "true");
+    });
+    files.forEach((file, i) => file.setAttribute("aria-pressed", i === index ? "true" : "false"));
+    if (count) count.textContent = `${index + 1} / ${items.length}`;
+    if (path && names[index]) path.textContent = `~/what-we-do/${names[index]}`;
+    const copy = items[index].querySelector(".do-copy");
+    if (copy && controls) copy.appendChild(controls);
+  }
+  const controls = doTerm.querySelector(".do-controls");
+  showDo(0, 0);
+  doTerm.querySelector(".do-next").addEventListener("click", () => showDo(index + 1, 1));
+  doTerm.querySelector(".do-prev").addEventListener("click", () => showDo(index - 1, -1));
+  doTerm.querySelector(".do-list").addEventListener("click", (event) => {
+    if (event.target.closest(".do-controls")) return;
+    showDo(index + 1, 1);
+  });
+  files.forEach((file) => {
+    file.addEventListener("click", () => {
+      const next = Number(file.dataset.do);
+      showDo(next, next === index ? 0 : next > index ? 1 : -1);
+    });
+  });
+}
+
 const brand = document.querySelector(".brand");
 brand.addEventListener("click", (event) => {
   event.preventDefault();
@@ -103,6 +180,16 @@ brand.addEventListener("click", (event) => {
   window.scrollTo({ top: 0, behavior: reduce ? "auto" : "smooth" });
   if (location.hash !== "#top") history.pushState(null, "", "#top");
 });
+
+const heroScroll = document.querySelector(".hero-scroll");
+if (heroScroll) {
+  heroScroll.addEventListener("click", (event) => {
+    event.preventDefault();
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    document.getElementById("about").scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+    if (location.hash !== "#about") history.pushState(null, "", "#about");
+  });
+}
 
 const newsList = document.querySelector("#news-list");
 
@@ -181,4 +268,111 @@ if (newsList) {
   }).catch(() => {
     newsList.innerHTML = "<li>Latest stories will show here when the feeds are reachable.</li>";
   });
+}
+
+const teamSource = document.querySelector(".team-source");
+const teamFilters = document.querySelector(".team-filters");
+const teamLanes = [...document.querySelectorAll(".team-lane")];
+const teamBoard = document.querySelector(".team-lanes");
+
+function paintTeam() {
+  if (!teamSource || !teamFilters || !teamLanes.length) return;
+  const active = teamFilters.querySelector("[aria-pressed='true']");
+  const group = active ? active.dataset.group : "all";
+  const people = [...teamSource.querySelectorAll(".member")].filter(
+    (member) => group === "all" || member.dataset.group === group
+  );
+  const moving = group === "all";
+  const roleOf = (person) => person.querySelector(".member-role").textContent;
+  const rows = moving
+    ? [
+        people.filter((person) => person.dataset.group !== "technical"),
+        people.filter((person) => person.dataset.group === "technical"),
+      ]
+    : group === "technical"
+      ? [
+          people.filter((person) => !roleOf(person).includes("Associate")),
+          people.filter((person) => roleOf(person).includes("Associate")),
+        ]
+      : [people, []];
+
+  if (teamBoard) teamBoard.classList.toggle("is-static", !moving);
+
+  teamLanes.forEach((lane, index) => {
+    const track = lane.querySelector(".team-track");
+    const set = rows[index];
+    track.replaceChildren();
+    lane.hidden = set.length === 0;
+    if (!set.length) return;
+
+    const half = document.createElement("div");
+    half.className = "team-half";
+    const appendSet = (hide) => {
+      set.forEach((person) => {
+        const copy = person.cloneNode(true);
+        if (hide) copy.setAttribute("aria-hidden", "true");
+        half.append(copy);
+      });
+    };
+
+    appendSet(false);
+    track.append(half);
+    if (!moving) return;
+
+    let guard = 0;
+    while (half.scrollWidth < lane.clientWidth && guard < 8) {
+      appendSet(true);
+      guard += 1;
+    }
+    const twin = half.cloneNode(true);
+    twin.setAttribute("aria-hidden", "true");
+    twin.querySelectorAll(".member").forEach((node) => node.setAttribute("aria-hidden", "true"));
+    track.append(twin);
+  });
+}
+
+const teamMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+let teamClock = 0;
+let teamStamp = 0;
+
+function teamShift(now) {
+  if (!teamBoard) return;
+  if (!teamStamp) teamStamp = now;
+  const still = teamBoard.classList.contains("is-static");
+  if (!still) teamClock += Math.min(Math.max(now - teamStamp, 0), 48);
+  teamStamp = now;
+
+  teamLanes.forEach((lane, index) => {
+    const track = lane.querySelector(".team-track");
+    if (!track) return;
+    const half = track.querySelector(".team-half");
+    if (still || !half || lane.hidden) {
+      track.style.transform = "";
+      return;
+    }
+    const distance = half.getBoundingClientRect().width;
+    if (!distance) return;
+    const travel = ((teamClock / 1000) * 44) % distance;
+    const x = index === 1 ? travel - distance : -travel;
+    track.style.transform = `translate3d(${x}px,0,0)`;
+  });
+}
+
+function tickTeam(now) {
+  if (!teamMotion.matches) teamShift(now);
+  requestAnimationFrame(tickTeam);
+}
+
+if (teamFilters) {
+  teamFilters.addEventListener("click", (event) => {
+    const button = event.target.closest("button");
+    if (!button || !teamFilters.contains(button)) return;
+    teamFilters.querySelectorAll("button").forEach((item) => {
+      item.setAttribute("aria-pressed", item === button ? "true" : "false");
+    });
+    paintTeam();
+  });
+  paintTeam();
+  requestAnimationFrame(tickTeam);
+  window.addEventListener("resize", paintTeam);
 }
